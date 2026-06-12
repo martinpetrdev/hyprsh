@@ -1,9 +1,11 @@
 "use client";
 
+import { API } from "@/classes/API";
+import { HyprlandEvents } from "@/classes/HyprlandEvents";
 import { TBIcon } from "@/components/base/taskbar/TBIcon";
 import { TBText } from "@/components/base/taskbar/TBText";
 import { ITBWidgetDefinition } from "@/types/taskbar/widget";
-import { ComponentType } from "react";
+import { ComponentType, useCallback, useEffect, useState } from "react";
 import { SiFedora } from "react-icons/si";
 
 export class TBWindowTitleWidget implements ITBWidgetDefinition {
@@ -13,5 +15,28 @@ export class TBWindowTitleWidget implements ITBWidgetDefinition {
 }
 
 function TBWindowTitleWidgetComponent() {
-  return <TBText>My awesome window title</TBText>;
+  const [title, setTitle] = useState<string>("");
+
+  const fetchTitle = useCallback(async () => {
+    const result = await API.get<{ title: string }>("/v1/window/active/title");
+
+    if ("error" in result) {
+      setTitle("ERR");
+      return;
+    }
+
+    setTitle(result.title ?? "");
+  }, []);
+
+  useEffect(() => {
+    fetchTitle();
+
+    const handler = HyprlandEvents.on("activewindow", () => fetchTitle());
+
+    return () => {
+      handler.off();
+    };
+  }, [fetchTitle]);
+
+  return <TBText>{title}</TBText>;
 }

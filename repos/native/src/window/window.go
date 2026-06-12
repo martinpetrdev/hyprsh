@@ -16,6 +16,7 @@ type Window struct {
 
 func (w *Window) Init() {
 	gtkc.GtkInit()
+	gtkc.GtkPreferDarkTheme()
 }
 
 func (w *Window) Create() {
@@ -35,7 +36,7 @@ func (w *Window) Create() {
 
 	gtkc.GtkContainerAdd(w.gtkWindow, (*gtkc.GtkWidget)(unsafe.Pointer(w.webview)))
 
-	webview.LoadURI(w.webview, "http://127.99.22.16:3000")
+	webview.LoadURI(w.webview, "http://127.99.22.16:3000/taskbar")
 
 	gtkc.GtkWindowShow(w.gtkWindow)
 	gtkc.GtkMain()

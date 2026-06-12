@@ -1,0 +1,28 @@
+"use client";
+
+import { TBText } from "@/components/base/taskbar/TBText";
+import { ITBWidgetDefinition } from "@/types/taskbar/widget";
+import { ComponentType, useEffect, useState } from "react";
+
+export class TBClockWidget implements ITBWidgetDefinition {
+  public readonly id: string = "clock";
+
+  public readonly component: ComponentType = TBClockWidgetComponent;
+}
+
+function TBClockWidgetComponent() {
+  const [time, setTime] = useState<string | null>(null);
+
+  useEffect(() => {
+    const i = setInterval(() => {
+      const date = new Date();
+      setTime(
+        `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`,
+      );
+    }, 1000);
+
+    return () => clearInterval(i);
+  }, []);
+
+  return <TBText>{time}</TBText>;
+}

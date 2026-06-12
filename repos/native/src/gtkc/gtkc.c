@@ -17,3 +17,8 @@ void gtkc_set_input_region(GtkWidget *window, int x, int y, int w, int h) {
   gtk_widget_input_shape_combine_region(window, region);
   cairo_region_destroy(region);
 }
+
+void gtkc_prefer_dark_theme(void) {
+  GtkSettings *settings = gtk_settings_get_default();
+  g_object_set(settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
+}

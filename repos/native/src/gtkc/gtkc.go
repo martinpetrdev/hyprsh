@@ -13,6 +13,10 @@ func GtkInit() {
 	C.gtk_init(nil, nil)
 }
 
+func GtkPreferDarkTheme() {
+	C.gtkc_prefer_dark_theme()
+}
+
 func GtkWindowNewToplevel() *GtkWidget {
 	return (*GtkWidget)(C.gtk_window_new(C.GTK_WINDOW_TOPLEVEL))
 }

@@ -8,5 +8,6 @@
 
 void gtkc_set_input_region(GtkWidget *window, int x, int y, int w,
                            int h);
+void gtkc_prefer_dark_theme(void);
 
 #endif

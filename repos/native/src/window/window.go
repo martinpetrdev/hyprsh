@@ -28,13 +28,14 @@ func (w *Window) Create() {
 	gtkc.GtkWidgetSetAppPaintable(w.gtkWindow)
 	gtkc.GtkcSetLayerShell(w.gtkWindow)
 	gtkc.GtkcSetNamespace(w.gtkWindow, config.ProjectNamespace)
-	gtkc.GtkcSetAnchorAndSize(w.gtkWindow, sw, 200, 0)
+	gtkc.GtkcSetAnchorAndSize(w.gtkWindow, sw, config.TaskbarHeight, 0)
 
 	webview.SetWebviewBackground(w.webview)
 	webview.AllowAccessToLocalFiles(w.webview)
-	webview.LoadURI(w.webview, "https://example.com")
 
 	gtkc.GtkContainerAdd(w.gtkWindow, (*gtkc.GtkWidget)(unsafe.Pointer(w.webview)))
+
+	webview.LoadURI(w.webview, "http://127.99.22.16:3000")
 
 	gtkc.GtkWindowShow(w.gtkWindow)
 	gtkc.GtkMain()

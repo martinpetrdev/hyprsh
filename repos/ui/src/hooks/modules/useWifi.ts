@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useWifiStore } from "../stores/useWifiStore";
+import { useCallback, useEffect } from "react";
+import { useWifiStore, IWifiNetwork } from "../stores/useWifiStore";
 import { API } from "@/classes/API";
 import { useEvent } from "./useEvents";
 
@@ -12,7 +12,11 @@ export function useWifiModule() {
       store.setConnected(false);
       store.setSsid(null);
       store.setStrength(null);
-    } else await fetchConnection();
+      store.setNetworks([]);
+    } else {
+      await fetchConnection();
+      await fetchNetworks(true);
+    }
   });
   useEvent("wifi.ssid", (ssid: string | null) => {
     store.setSsid(ssid);
@@ -24,6 +28,9 @@ export function useWifiModule() {
   });
   useEvent("wifi.strength", (strength: number | null) => {
     store.setStrength(strength);
+  });
+  useEvent("wifi.networks", (networks: IWifiNetwork[]) => {
+    store.setNetworks(networks);
   });
 
   const fetchStatus = async () => {
@@ -53,12 +60,49 @@ export function useWifiModule() {
     }
   };
 
+  const fetchNetworks = useCallback(async (rescan = false) => {
+    const result = await API.get<IWifiNetwork[]>(
+      `/v1/network/wifi/list${rescan ? "?rescan=true" : ""}`,
+    );
+
+    if ("error" in result) {
+      store.setNetworks([]);
+      return;
+    }
+
+    store.setNetworks(result);
+  }, []);
+
   const initialize = async () => {
     await fetchStatus();
     await fetchConnection();
 
+    if (store.powered) {
+      await fetchNetworks(false);
+    } else {
+      store.setNetworks([]);
+    }
+
     store._setInitialized(true);
   };
+
+  const togglePower = useCallback(async (enabled: boolean) => {
+    await API.post<void, { enabled: boolean }>("/v1/network/wifi/power", {
+      enabled,
+    });
+  }, []);
+
+  const connect = useCallback(async (ssid: string) => {
+    store.setConnectingSsid(ssid);
+
+    try {
+      await API.post<void, { ssid: string }>("/v1/network/wifi/connect", {
+        ssid,
+      });
+    } finally {
+      store.setConnectingSsid(null);
+    }
+  }, []);
 
   useEffect(() => {
     initialize();
@@ -71,5 +115,10 @@ export function useWifiModule() {
     connected: store.connected,
     ssid: store.ssid,
     strength: store.strength,
+    networks: store.networks,
+    connectingSsid: store.connectingSsid,
+    fetchNetworks,
+    togglePower,
+    connect,
   };
 }

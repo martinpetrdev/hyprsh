@@ -49,31 +49,54 @@ export class NetworkService implements OnModuleInit {
       'org.freedesktop.NetworkManager',
       wifiPath,
       (prop: string, val: any) => {
-        if (prop == 'ActiveAccessPoint') this.$handleWifiActiveAccessPoint(val);
+        if (prop == 'ActiveAccessPoint' || prop == 'State')
+          this.$updateWifiConnectionState();
       },
     );
 
-    await this.$checkInitialActiveAccessPoint(wifiPath);
+    await this.$updateWifiConnectionState();
+
+    try {
+      const wifiDevice = await this.dbusService.getInterface(
+        'org.freedesktop.NetworkManager',
+        wifiPath,
+        'org.freedesktop.NetworkManager.Device.Wireless',
+      );
+
+      wifiDevice.on('AccessPointAdded', () => this.$emitWifiNetworks());
+      wifiDevice.on('AccessPointRemoved', () => this.$emitWifiNetworks());
+    } catch (err) {
+      this.logger.error(`Failed to register AP signals: ${err.message}`);
+    }
   }
 
   async getWifiDetails(): Promise<{
     ssid: string;
     strength: number;
   } | null> {
-    const output = await this.commandService.execAsync('nmcli', [
-      '-t',
-      '-f',
-      'active,ssid,signal,rate',
-      'dev',
-      'wifi',
-    ]);
+    try {
+      const wifiPath = await this.$getWifiDBusPath();
+      if (!wifiPath) return null;
 
-    const line = output.split('\n').find((l) => l.startsWith('yes:'));
-    if (!line) return null;
+      const deviceInterface = await this.dbusService.getPropertiesInterface(
+        'org.freedesktop.NetworkManager',
+        wifiPath,
+      );
 
-    const [_active, ssid, signal] = line.split(':');
+      const activeApVariant = await deviceInterface.Get(
+        'org.freedesktop.NetworkManager.Device.Wireless',
+        'ActiveAccessPoint',
+      );
+      const activeApPath = activeApVariant.value;
 
-    return { ssid, strength: parseInt(signal) };
+      if (!activeApPath || activeApPath === '/') return null;
+
+      return await this.$getAccessPointDetails(activeApPath);
+    } catch (err) {
+      this.logger.error(`Failed to get wifi details from DBus: ${err.message}`);
+
+      return null;
+    }
   }
 
   async listWifi(rescan: boolean = false): Promise<
@@ -84,66 +107,82 @@ export class NetworkService implements OnModuleInit {
       open: boolean;
     }[]
   > {
-    const args = [
-      '-t',
-      '-f',
-      'active,ssid,signal,security',
-      'dev',
-      'wifi',
-      'list',
-      '--rescan',
-      rescan ? 'yes' : 'no',
-    ];
+    try {
+      const wifiPath = await this.$getWifiDBusPath();
+      if (!wifiPath) return [];
 
-    const output = await this.commandService.execAsync('nmcli', args);
-    const lines = output.split('\n').filter((l) => l.trim().length > 0);
+      const status = await this.getWifiStatus();
+      if (!status.powered) return [];
 
-    const map = new Map<
-      string,
-      {
-        active: boolean;
-        ssid: string;
-        signal: number;
-        open: boolean;
+      const wifiDevice = await this.dbusService.getInterface(
+        'org.freedesktop.NetworkManager',
+        wifiPath,
+        'org.freedesktop.NetworkManager.Device.Wireless',
+      );
+
+      if (rescan) {
+        try {
+          await wifiDevice.RequestScan({});
+        } catch (scanErr) {
+          this.logger.warn(`Failed to request scan: ${scanErr.message}`);
+        }
       }
-    >();
 
-    for (const line of lines) {
-      const parts = line.split(':');
-      if (parts.length < 4) continue;
+      const aps: string[] = await wifiDevice.GetAccessPoints();
+      const devProps = await this.dbusService.getPropertiesInterface(
+        'org.freedesktop.NetworkManager',
+        wifiPath,
+      );
+      const activeApVariant = await devProps.Get(
+        'org.freedesktop.NetworkManager.Device.Wireless',
+        'ActiveAccessPoint',
+      );
+      const activeApPath = activeApVariant?.value;
 
-      const active = parts[0] === 'yes';
-      const security = parts[parts.length - 1];
-      const signalStr = parts[parts.length - 2];
-      const signal = parseInt(signalStr, 10) || 0;
+      const map = new Map<
+        string,
+        {
+          active: boolean;
+          ssid: string;
+          signal: number;
+          open: boolean;
+        }
+      >();
 
-      const ssidParts = parts.slice(1, parts.length - 2);
-      const ssid = ssidParts.join(':').replace(/\\:/g, ':');
+      for (const apPath of aps) {
+        try {
+          const apDetails = await this.$getAccessPointDetails(apPath);
+          const active = apPath === activeApPath;
 
-      if (!ssid) continue;
+          const existing = map.get(apDetails.ssid);
 
-      const open = security === '--' || security.trim() === '';
-
-      const existing = map.get(ssid);
-      if (
-        !existing ||
-        active ||
-        (!existing.active && signal > existing.signal)
-      ) {
-        map.set(ssid, {
-          active: existing?.active || active,
-          ssid,
-          signal,
-          open,
-        });
+          if (
+            !existing ||
+            active ||
+            (!existing.active && apDetails.strength > existing.signal)
+          ) {
+            map.set(apDetails.ssid, {
+              active: existing?.active || active,
+              ssid: apDetails.ssid,
+              signal: apDetails.strength,
+              open: apDetails.open,
+            });
+          }
+        } catch (apErr) {
+          continue;
+        }
       }
+
+      return Array.from(map.values()).sort((a, b) => {
+        if (a.active && !b.active) return -1;
+        if (!a.active && b.active) return 1;
+        return b.signal - a.signal;
+      });
+    } catch (err) {
+      this.logger.error(`Failed to list wifi via DBus: ${err.message}`);
+
+      return [];
     }
-
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.active && !b.active) return -1;
-      if (!a.active && b.active) return 1;
-      return b.signal - a.signal;
-    });
   }
 
   async connectWifi(ssid: string) {
@@ -159,14 +198,26 @@ export class NetworkService implements OnModuleInit {
   async getWifiStatus(): Promise<{
     powered: boolean;
   }> {
-    const output = await this.commandService.execAsync('nmcli', [
-      'radio',
-      'wifi',
-    ]);
+    try {
+      const nmProps = await this.dbusService.getPropertiesInterface(
+        'org.freedesktop.NetworkManager',
+        '/org/freedesktop/NetworkManager',
+      );
+      const wirelessEnabledVariant = await nmProps.Get(
+        'org.freedesktop.NetworkManager',
+        'WirelessEnabled',
+      );
 
-    return {
-      powered: output.trim() == 'enabled',
-    };
+      return {
+        powered: Boolean(wirelessEnabledVariant.value),
+      };
+    } catch (err) {
+      this.logger.error(`Failed to get wifi status from DBus: ${err.message}`);
+
+      return {
+        powered: false,
+      };
+    }
   }
 
   async toggleWifiPower(enabled: boolean) {
@@ -244,83 +295,146 @@ export class NetworkService implements OnModuleInit {
   // --- Events ---
   private $handleWifiWirelessEnabled(value: boolean) {
     this.eventsService.emit('wifi.power', value);
+    this.$updateWifiConnectionState();
 
-    if (!value) this.$handleWifiActiveAccessPoint('/');
+    if (value)
+      setTimeout(async () => {
+        try {
+          const wifiPath = await this.$getWifiDBusPath();
+          if (wifiPath) {
+            const wifiDevice = await this.dbusService.getInterface(
+              'org.freedesktop.NetworkManager',
+              wifiPath,
+              'org.freedesktop.NetworkManager.Device.Wireless',
+            );
+
+            await wifiDevice.RequestScan({});
+          }
+        } catch (err) {}
+      }, 1000);
   }
 
-  private async $handleWifiActiveAccessPoint(dbusPath: string) {
+  private async $updateWifiConnectionState() {
     if (this.activeApListenerCleanup) {
       this.activeApListenerCleanup();
       this.activeApListenerCleanup = null;
     }
 
-    if (!dbusPath || dbusPath === '/') {
-      this.eventsService.emit('wifi.ssid', null);
-      this.eventsService.emit('wifi.strength', null);
-
-      return;
-    }
-
     try {
-      const apInterface = await this.dbusService.getPropertiesInterface(
+      const wifiPath = await this.$getWifiDBusPath();
+      if (!wifiPath) {
+        this.eventsService.emit('wifi.ssid', null);
+        this.eventsService.emit('wifi.strength', null);
+        this.$emitWifiNetworks();
+        return;
+      }
+
+      const devProps = await this.dbusService.getPropertiesInterface(
         'org.freedesktop.NetworkManager',
-        dbusPath,
+        wifiPath,
       );
 
-      const ssidVariant = await apInterface.Get(
-        'org.freedesktop.NetworkManager.AccessPoint',
-        'Ssid',
+      const stateVariant = await devProps.Get(
+        'org.freedesktop.NetworkManager.Device',
+        'State',
       );
-      const ssid = ssidVariant.value.toString('utf-8');
+      const state = stateVariant.value;
 
-      const strengthVariant = await apInterface.Get(
-        'org.freedesktop.NetworkManager.AccessPoint',
-        'Strength',
+      if (state !== 100) {
+        this.eventsService.emit('wifi.ssid', null);
+        this.eventsService.emit('wifi.strength', null);
+        this.$emitWifiNetworks();
+        return;
+      }
+
+      const activeApVariant = await devProps.Get(
+        'org.freedesktop.NetworkManager.Device.Wireless',
+        'ActiveAccessPoint',
       );
-      const strength = strengthVariant.value;
+      const activeApPath = activeApVariant.value;
+
+      if (!activeApPath || activeApPath === '/') {
+        this.eventsService.emit('wifi.ssid', null);
+        this.eventsService.emit('wifi.strength', null);
+        this.$emitWifiNetworks();
+
+        return;
+      }
+
+      const { ssid, strength } =
+        await this.$getAccessPointDetails(activeApPath);
 
       this.eventsService.emit('wifi.ssid', ssid);
       this.eventsService.emit('wifi.strength', strength);
 
       this.activeApListenerCleanup = await this.dbusService.addListener(
         'org.freedesktop.NetworkManager',
-        dbusPath,
+        activeApPath,
         (prop: string, val: any) => {
-          if (prop === 'Strength')
+          if (prop === 'Strength') {
             this.eventsService.emit('wifi.strength', val);
+            this.$emitWifiNetworks();
+          }
+
           if (prop === 'Ssid') {
             const newSsid = val.toString('utf-8');
             this.eventsService.emit('wifi.ssid', newSsid);
+            this.$emitWifiNetworks();
           }
         },
       );
     } catch (err) {
       this.logger.error(
-        `Failed to handle active access point ${dbusPath}: ${err.message}`,
+        `Failed to update wifi connection state: ${err.message}`,
       );
-
       this.eventsService.emit('wifi.ssid', null);
       this.eventsService.emit('wifi.strength', null);
+    } finally {
+      this.$emitWifiNetworks();
     }
   }
 
-  private async $checkInitialActiveAccessPoint(wifiPath: string) {
-    try {
-      const devProps = await this.dbusService.getPropertiesInterface(
-        'org.freedesktop.NetworkManager',
-        wifiPath,
-      );
-      const activeApVariant = await devProps.Get(
-        'org.freedesktop.NetworkManager.Device.Wireless',
-        'ActiveAccessPoint',
-      );
+  private async $getAccessPointDetails(dbusPath: string): Promise<{
+    ssid: string;
+    strength: number;
+    open: boolean;
+  }> {
+    const apInterface = await this.dbusService.getPropertiesInterface(
+      'org.freedesktop.NetworkManager',
+      dbusPath,
+    );
 
-      if (activeApVariant && activeApVariant.value)
-        await this.$handleWifiActiveAccessPoint(activeApVariant.value);
+    const ssidVariant = await apInterface.Get(
+      'org.freedesktop.NetworkManager.AccessPoint',
+      'Ssid',
+    );
+    const ssid = ssidVariant.value.toString('utf-8');
+
+    const strengthVariant = await apInterface.Get(
+      'org.freedesktop.NetworkManager.AccessPoint',
+      'Strength',
+    );
+    const strength = strengthVariant.value;
+
+    const wpaFlagsVariant = await apInterface.Get(
+      'org.freedesktop.NetworkManager.AccessPoint',
+      'WpaFlags',
+    );
+    const rsnFlagsVariant = await apInterface.Get(
+      'org.freedesktop.NetworkManager.AccessPoint',
+      'RsnFlags',
+    );
+    const open = wpaFlagsVariant.value === 0 && rsnFlagsVariant.value === 0;
+
+    return { ssid, strength, open };
+  }
+
+  private async $emitWifiNetworks() {
+    try {
+      const networks = await this.listWifi();
+      this.eventsService.emit('wifi.networks', networks);
     } catch (err) {
-      this.logger.error(
-        `Failed to get initial active access point: ${err.message}`,
-      );
+      this.logger.error(`Failed to emit wifi networks: ${err.message}`);
     }
   }
 }

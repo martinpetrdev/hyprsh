@@ -1,17 +1,14 @@
 "use client";
 
-import { API } from "@/classes/API";
 import { Spinner } from "@/components/base/Spinner";
 import { TBIcon } from "@/components/base/taskbar/TBIcon";
 import { TBText } from "@/components/base/taskbar/TBText";
 import { Toggle } from "@/components/base/Toggle";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import {
   MdArrowBack,
-  MdArrowRight,
   MdCheck,
-  MdRunCircle,
   MdSignalWifi0Bar,
   MdSignalWifi1Bar,
   MdSignalWifi1BarLock,
@@ -22,99 +19,18 @@ import {
   MdSignalWifi4Bar,
   MdSignalWifi4BarLock,
   MdWifi,
-  MdWifi1Bar,
-  MdWifiLock,
 } from "react-icons/md";
-import { PiCheck, PiSpinner } from "react-icons/pi";
-
-interface IWifiNetworkInfo {
-  ssid: string;
-  signal: number;
-  open: boolean;
-  active: boolean;
-}
-
-interface IWifiStatus {
-  powered: boolean;
-}
+import { useWifiModule } from "@/hooks/modules/useWifi";
 
 export default function Page() {
-  const [toggleValue, setToggleValue] = useState(false);
-  const [connectingTo, setConnectingTo] = useState("");
-
-  const [networks, setNetworks] = useState<IWifiNetworkInfo[] | null>(null);
-
-  const fetchStatus = useCallback(async () => {
-    const result = await API.get<IWifiStatus>("/v1/network/wifi/status");
-    if ("error" in result) {
-      setToggleValue(false);
-      setNetworks(null);
-      return;
-    }
-
-    setToggleValue(result.powered);
-  }, []);
-
-  const fetchNetworks = useCallback(async () => {
-    const result = await API.get<IWifiNetworkInfo[]>(
-      "/v1/network/wifi/list?rescan=true",
-    );
-    if ("error" in result) {
-      setNetworks([]);
-      return;
-    }
-
-    setNetworks(result);
-  }, []);
-
-  const togglePower = useCallback(
-    async (enabled: boolean) => {
-      await API.post<
-        void,
-        {
-          enabled: boolean;
-        }
-      >("/v1/network/wifi/power", { enabled: enabled });
-
-      await fetchStatus();
-      await fetchNetworks();
-    },
-    [fetchStatus, fetchNetworks],
-  );
-
-  const connect = useCallback(
-    async (ssid: string) => {
-      setConnectingTo(ssid);
-
-      await API.post<
-        void,
-        {
-          ssid: string;
-        }
-      >("/v1/network/wifi/connect", {
-        ssid: ssid,
-      });
-
-      await fetchStatus();
-      await fetchNetworks();
-      setConnectingTo("");
-    },
-    [fetchNetworks],
-  );
+  const wifi = useWifiModule();
 
   useEffect(() => {
-    (async () => {
-      await fetchStatus();
-      await fetchNetworks();
-    })();
-
-    const i = setInterval(async () => {
-      await fetchStatus();
-      await fetchNetworks();
-    }, 5000);
-
-    return () => clearInterval(i);
-  }, [fetchNetworks, fetchStatus]);
+    if (wifi.powered) {
+      wifi.fetchNetworks(false);
+      wifi.fetchNetworks(true);
+    }
+  }, [wifi.powered, wifi.fetchNetworks]);
 
   return (
     <div
@@ -129,13 +45,13 @@ export default function Page() {
         <TBText className="font-semibold text-ctp-lavender">Wi-Fi</TBText>
         <Toggle
           className="ml-auto"
-          value={toggleValue}
-          onToggle={() => togglePower(!toggleValue)}
+          value={wifi.powered}
+          onToggle={() => wifi.togglePower(!wifi.powered)}
         />
       </div>
-      {networks ? (
+      {wifi.networks ? (
         <div className="w-full pt-2 flex flex-col gap-px px-2 h-94 max-h-94 overflow-auto">
-          {networks
+          {wifi.networks
             .sort((a, b) => (a.signal > b.signal ? -1 : 1))
             .map((w) => {
               const bars =
@@ -170,7 +86,7 @@ export default function Page() {
                 <div
                   key={w.ssid}
                   className="w-full flex flex-row gap-2 items-center px-2 py-1 hover:bg-ctp-surface0/50 rounded-sm transition-colors duration-200 cursor-pointer"
-                  onClick={() => connect(w.ssid)}
+                  onClick={() => wifi.connect(w.ssid)}
                 >
                   <TBIcon
                     icon={iconConfig[!w.open ? "secure" : "normal"][bars]}
@@ -182,7 +98,7 @@ export default function Page() {
                       className="text-ctp-lavender ml-auto"
                     />
                   )}
-                  {connectingTo == w.ssid && (
+                  {wifi.connectingSsid === w.ssid && (
                     <Spinner container={TBIcon} className="ml-auto" />
                   )}
                 </div>

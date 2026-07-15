@@ -1,7 +1,7 @@
 package webview
 
 /*
-#cgo pkg-config: gtk+-3.0 webkit2gtk-4.0 gtk-layer-shell-0
+#cgo pkg-config: gtk+-3.0 webkit2gtk-4.1 gtk-layer-shell-0
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
 #include <gtk-layer-shell.h>

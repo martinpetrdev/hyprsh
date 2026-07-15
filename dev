@@ -1,0 +1,12 @@
+#!/bin/bash
+
+./kill
+
+cd repos/backend
+pnpm run start:dev &
+
+cd ../ui
+pnpm run dev &
+
+cd ../native
+go run src/main.go

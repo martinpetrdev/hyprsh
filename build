@@ -1,0 +1,78 @@
+#!/bin/bash
+
+B_ROOT=$(pwd)
+B_BACKEND="${B_ROOT}/repos/backend"
+B_UI="${B_ROOT}/repos/ui"
+B_NATIVE="${B_ROOT}/repos/native"
+B_OUT="${B_ROOT}/dist"
+
+# Recreate blank dist dir
+rm -r $B_OUT 2>/dev/null || true
+mkdir -p $B_OUT
+
+# Build backend
+cd $B_BACKEND
+pnpm run build
+mkdir -p $B_OUT/backend
+cp -r dist $B_OUT/backend
+cp -r node_modules $B_OUT/backend/
+cp package*.json $B_OUT/backend/
+cp pnpm-*.yaml $B_OUT/backend/
+
+# Build ui
+cd $B_UI
+pnpm run build
+mkdir -p $B_OUT/ui
+cp -r .next/standalone $B_OUT/ui
+cp -r .next/static $B_OUT/ui/standalone/.next/static
+cp package*.json $B_OUT/ui/
+cp pnpm-*.yaml $B_OUT/ui/
+
+# Build native
+cd $B_NATIVE
+go build -o $B_OUT/bin/hyprsh src/main.go
+chmod +x $B_OUT/bin/hyprsh
+
+# Resolve the absolute path of the node binary
+NODE_BIN=$(which node 2>/dev/null)
+if [ -z "$NODE_BIN" ]; then
+    echo "Error: node is not installed or not in PATH"
+    exit 1
+fi
+# Resolve symlinks to get the permanent/static path (useful for managers like fnm, nvm, etc.)
+RESOLVED_NODE_BIN=$(readlink -f "$NODE_BIN")
+
+cat <<EOF > $B_OUT/run
+#!/bin/bash
+
+HYPRSH_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+
+# Clean up background jobs on exit
+trap 'kill \$(jobs -p) 2>/dev/null' EXIT
+
+# Start backend in background
+cd "\$HYPRSH_DIR/backend"
+$RESOLVED_NODE_BIN dist/main.js > /tmp/hyprsh-backend.log 2>&1 &
+
+# Start ui
+cd "\$HYPRSH_DIR/ui"
+HOSTNAME=127.99.22.16 PORT=3000 $RESOLVED_NODE_BIN standalone/server.js > /tmp/hyprsh-ui.log 2>&1 &
+
+# Wait for backend to be ready
+while ! timeout 1 bash -c "echo > /dev/tcp/127.99.22.16/3001" 2>/dev/null; do
+    sleep 0.1
+done
+
+# Wait for UI to be ready
+while ! timeout 1 bash -c "echo > /dev/tcp/127.99.22.16/3000" 2>/dev/null; do
+    sleep 0.1
+done
+
+# Start native
+cd "\$HYPRSH_DIR/bin"
+./hyprsh
+
+EOF
+
+chmod +x $B_OUT/run
+

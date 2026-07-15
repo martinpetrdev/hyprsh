@@ -12,9 +12,9 @@ export class DbusService {
     const int = object.getInterface('org.freedesktop.DBus.Properties');
 
     const handler = (_: any, data: Record<string, { value: any }>) => {
-      const key = Object.keys(data)[0];
-
-      if (key) listener(key, data[key].value);
+      for (const key of Object.keys(data)) {
+        listener(key, data[key].value);
+      }
     };
 
     int.on('PropertiesChanged', handler);

@@ -1,5 +1,6 @@
 import { API } from "@/classes/API";
 import { TBIcon } from "@/components/base/taskbar/TBIcon";
+import { useBattery } from "@/hooks/modules/useBattery";
 import { useCallback, useEffect, useState } from "react";
 import {
   MdBattery0Bar,
@@ -45,66 +46,40 @@ const iconConfig = {
 };
 
 export function TBQSWBattery() {
-  const [charging, setCharging] = useState<boolean>(false);
-  const [percentage, setPercentage] = useState<number>(0);
+  const battery = useBattery();
 
-  const fetchDetails = useCallback(async () => {
-    const result = await API.get<{
-      state: string;
-      percentage: number;
-    }>("/v1/power/battery/BAT0/stats");
-
-    if (!result || "error" in result) {
-      setCharging(false);
-      setPercentage(0);
-
-      return;
-    }
-
-    setCharging(result.state == "charging");
-    setPercentage(result.percentage);
-  }, []);
-
-  useEffect(() => {
-    fetchDetails();
-
-    const i = setInterval(() => {
-      fetchDetails();
-    }, 1000);
-
-    return () => clearInterval(i);
-  }, [fetchDetails]);
+  if (!battery._initialized) return <></>;
 
   // TODO: Refactor - I am going to sleep (really, I am lazy)
-  const icon = charging
-    ? percentage == 100
+  const icon = battery.charging
+    ? battery.charge == 100
       ? iconConfig.ch100
-      : percentage >= 90
+      : battery.charge >= 90
         ? iconConfig.ch90
-        : percentage >= 80
+        : battery.charge >= 80
           ? iconConfig.ch80
-          : percentage >= 60
+          : battery.charge >= 60
             ? iconConfig.ch60
-            : percentage >= 50
+            : battery.charge >= 50
               ? iconConfig.ch50
-              : percentage >= 30
+              : battery.charge >= 30
                 ? iconConfig.ch30
-                : percentage >= 20
+                : battery.charge >= 20
                   ? iconConfig.ch20
                   : iconConfig.ch0
-    : percentage >= 100
+    : battery.charge >= 100
       ? iconConfig[100]
-      : percentage >= 90
+      : battery.charge >= 90
         ? iconConfig[90]
-        : percentage >= 80
+        : battery.charge >= 80
           ? iconConfig[80]
-          : percentage >= 60
+          : battery.charge >= 60
             ? iconConfig[60]
-            : percentage >= 50
+            : battery.charge >= 50
               ? iconConfig[50]
-              : percentage >= 30
+              : battery.charge >= 30
                 ? iconConfig[30]
-                : percentage >= 20
+                : battery.charge >= 20
                   ? iconConfig[20]
                   : iconConfig[0];
 

@@ -1,7 +1,7 @@
 package gtkc
 
 /*
-#cgo pkg-config: gtk+-3.0 webkit2gtk-4.0 gtk-layer-shell-0
+#cgo pkg-config: gtk+-3.0 webkit2gtk-4.1 gtk-layer-shell-0
 #include "gtkc.h"
 */
 import "C"

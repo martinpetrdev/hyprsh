@@ -1,0 +1,10 @@
+#!/bin/bash
+
+./build
+
+HYPRSH_PATH="$HOME/.config/hypr/hyprsh"
+
+rm -r $HYPRSH_PATH 2>/dev/null || true
+mkdir -p $HYPRSH_PATH
+cp -r ./dist/* $HYPRSH_PATH
+

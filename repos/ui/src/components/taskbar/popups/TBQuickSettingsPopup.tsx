@@ -1,15 +1,6 @@
 import { TBPopup } from "@/components/base/taskbar/TBPopup";
-import {
-  ForwardedRef,
-  forwardRef,
-  RefObject,
-  useCallback,
-  useRef,
-  useState,
-} from "react";
-import { TBQSPWifi } from "./quick-settings/Wifi";
+import { ForwardedRef, forwardRef, useCallback, useRef, useState } from "react";
 import { TBIcon } from "@/components/base/taskbar/TBIcon";
-import { MdWifi } from "react-icons/md";
 import { TBText } from "@/components/base/taskbar/TBText";
 import { IconType } from "react-icons";
 
